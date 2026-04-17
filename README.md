@@ -43,6 +43,7 @@ El sistema no solo ajusta ganancias, sino que "decide" cuándo aprender mediante
 ### Inteligencia Artificial (Python)
 - `RedHamil.py`: Definición de la arquitectura de la red neuronal que predice el Hamiltoniano a partir de $(u_x, u_y, u_\theta)$.
 - `PruebaRedHamil.py`: Script de entrenamiento y validación de la red con datos post-evento.
+- `DatasetHamil.py`: Script para general el dataset para la red.
 - `prueba_masa.py`: Script del controlador propuesto en dónde cambia la masa del sistema.
 - `prueba_pausa.py`: Script en dónde se genera una interrupción o pausa al robot mediante un obstáculo móvil"".
 - `prueba_red.py` : Script del controlador propuesto para validar predicción de la red
@@ -59,3 +60,14 @@ El sistema no solo ajusta ganancias, sino que "decide" cuándo aprender mediante
 1. **Clonar el repositorio:**
    ```bash
    git clone [https://github.com/Fidedpro888/PID-Adaptativo-Bajo-Demanda-Mediante-Redes-Neuronales.git](https://github.com/Fidedpro888/PID-Adaptativo-Bajo-Demanda-Mediante-Redes-Neuronales.git)
+
+2. **Instalar las librerias previamente mencionadas**
+
+3. **Abrir el entorno de simulación de Coppelia en caso de usar un .py**
+   - `prueba_masa.ttt` : Entorno para el controlador con cambios de masa, pausa "imaginaria", poner a prueba la red, etc.
+   - `Pruebacubo.ttt` : Entorno para el controlador con una pausa física mediante un obstáculo móvil.
+
+   Iniciar coppelia y después el código de python, sin olvidar de correr primero `DatasetHamil.py` y luego `RedHamil.py`
+
+4. **Para códgio de Matlab solamente es correrlo**
+
