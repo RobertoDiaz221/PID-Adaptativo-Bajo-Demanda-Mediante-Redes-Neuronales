@@ -1,5 +1,5 @@
-# ZMQ + EKF-SNPID (freeze/histeresis) + referencias ORIGINAL "sinusoidal" y "rosa" + gráficas
-# + PREDICCIÓN DE HAMILTONIANO CON TENSORFLOW (comparación con H fí­sico)
+# ZMQ + EKF-SNPID (freeze/histeresis) + referencias ORIGINAL "sinusoidal" y "rosa" + grÃ¡ficas
+# + PREDICCIÃ“N DE HAMILTONIANO CON TENSORFLOW (comparaciÃ³n con H fÃ­Â­sico)
 # + SEGUIMIENTO POR PUNTOS (x,y,theta) con tolerancias y avance por error, y stop al terminar (loop=False)
 
 import time, math, sys, os
@@ -20,7 +20,7 @@ try:
     from tensorflow import keras
     from tensorflow.keras import backend as K
 except Exception as e:
-    print("[WARN] TensorFlow no disponible, sólo se graficará H fí­sico. Detalle:", e)
+    print("[WARN] TensorFlow no disponible, sÃ³lo se graficarÃ¡ H fÃ­Â­sico. Detalle:", e)
     TF_AVAILABLE = False
 
 MODEL_PATH = "hamiltonian_tf_model.keras"
@@ -37,7 +37,7 @@ def _load_tf_model(path):
     if not TF_AVAILABLE:
         return None
     if not os.path.exists(path):
-        print("[INFO] No se encontró el modelo TF para H:", path)
+        print("[INFO] No se encontrÃ³ el modelo TF para H:", path)
         return None
     try:
         print(f"[OK] Cargando modelo TF (safe_mode=False): {path}")
@@ -58,7 +58,7 @@ def _load_tf_model(path):
             custom_objects={"rmse_keras": rmse_keras, "r2_keras": r2_keras}
         )
     except Exception as e:
-        print("[WARN] Falló la carga del modelo TF. Detalle:", e)
+        print("[WARN] FallÃ³ la carga del modelo TF. Detalle:", e)
         return None
 
 def r2_score_np(y, yhat):
@@ -148,9 +148,9 @@ def ref_original(t, modo):
         thd = math.pi/2
         return xd, yd, thd
     else:
-        raise ValueError("Modo de referencia no válido. Usa 'sinusoidal' o 'rosa'.")
+        raise ValueError("Modo de referencia no vÃ¡lido. Usa 'sinusoidal' o 'rosa'.")
 
-# -------- Seguimiento por puntos con orientaciÃ³n --------
+# -------- Seguimiento por puntos con orientaciÃƒÂ³n --------
 class WaypointTrackerPose:
 
     def __init__(self, waypoints_xyz, tol_pos=0.05, tol_th=5*math.pi/180,
@@ -169,7 +169,7 @@ class WaypointTrackerPose:
         self.require_theta = bool(require_theta)
         self.loop = bool(loop)
         self.idx = 0
-        self.finished = False  # bandera de finalización
+        self.finished = False  # bandera de finalizaciÃ³n
 
     def current_target(self):
         return self.wps[self.idx]
@@ -207,13 +207,13 @@ class WaypointTrackerPose:
 
 # -------- Main --------
 def main():
-    # ===== Selección de referencia =====
+    # ===== SelecciÃ³n de referencia =====
     # Opciones: "sinusoidal" | "rosa" | "puntos"
     REF_MODO = "puntos"
 
-    S        = 15.0    # duración máx. de simulación [s]
+    S        = 15.0    # duraciÃ³n mÃ¡x. de simulaciÃ³n [s]
 
-    # ===== Geometrí­a YouBot =====
+    # ===== GeometrÃ­Â­a YouBot =====
     L = 0.1981; l = 0.1990
 
     # ===== EKF-SNPID =====
@@ -224,7 +224,7 @@ def main():
     alpha = 1.5
     uMax  = np.array([1.5, 1.5, 1.5])
 
-    # Freeze por normalización (histéresis)
+    # Freeze por normalizaciÃ³n (histÃ©resis)
     e_thr_freeze=0.45; e_thr_unfz=0.56
 
     # Pesos iniciales
@@ -238,21 +238,21 @@ def main():
     dx3=0.0; dy3=0.0; dt3=0.0
     freeze_x=False; freeze_y=False; freeze_t=False
 
-    # ===== Conexión =====
+    # ===== ConexiÃ³n =====
     bot = YouBot(port=23000, wheel_radius=0.10, w_min=-2.5, w_max=2.5)
     bot.stop(); time.sleep(0.05)
     cuboid = bot.sim.getObject('/Cuboid')
 
-    # ===== Waypoints con orientación (x, y, theta) =====
+    # ===== Waypoints con orientaciÃ³n (x, y, theta) =====
     WAYPOINTS_POSE = [
         (0.5, 0.0, 0.0),
         (1.0, 0.0, 0.0),
         (1.5, 0.0, 0.0),
         (2, 0.0, 0.0),
     ]
-    WP_TOL_POS   = 0.05               # tolerancia de posición [m]
+    WP_TOL_POS   = 0.05               # tolerancia de posiciÃ³n [m]
     WP_TOL_TH    = math.radians(8)    # tolerancia angular [rad]
-    WP_REQUIRE_TH= False              # True: exige también orientación para avanzar
+    WP_REQUIRE_TH= False              # True: exige tambiÃ©n orientaciÃ³n para avanzar
     WP_LOOP      = True              # False => se detiene al terminar
 
     if REF_MODO == "puntos":
@@ -271,7 +271,7 @@ def main():
     exn_log=[]; eyn_log=[]; ethn_log=[]
     Wx_log=[]; Wy_log=[]; Wt_log=[]; H_log=[]
     dist_log=[]             # ||p - p_prev||
-    wp_idx_log=[]           # í­ndice de waypoint activo
+    wp_idx_log=[]           # Ã­Â­ndice de waypoint activo
     wp_dist_log=[]          # distancia a waypoint activo
     wp_eth_log=[]           # |error angular| al waypoint activo
 
@@ -300,14 +300,14 @@ def main():
             # --- Estado actual ---
             p = bot.get_pose(); xk, yk, th = p
 
-            # --- Referencia según modo ---
+            # --- Referencia segÃºn modo ---
             if REF_MODO in ("sinusoidal","rosa"):
                 xd, yd, thd = ref_original(t, REF_MODO)
                 wp_idx = -1; wp_dist = np.nan; wp_eth = np.nan; wp_finished = False
             elif REF_MODO == "puntos":
                 xd, yd, thd, wp_idx, wp_dist, wp_eth, wp_finished = wp_track.step(xk, yk, th)
             else:
-                raise ValueError("REF_MODO inválido.")
+                raise ValueError("REF_MODO invÃ¡lido.")
 
             # --- Errores (mundo) ---
             ex  = xd - xk
@@ -318,7 +318,7 @@ def main():
             dx1, dy1, dt1 = ex, ey, eth
             dx2, dy2, dt2 = ex-ex_prev, ey-ey_prev, eth-eth_prev
 
-            # Integrales: sólo si hay avance
+            # Integrales: sÃ³lo si hay avance
             if t_prev is not None and p_prev is not None:
                 if np.linalg.norm(p - p_prev) > 2e-3:
                     dx3 += ex; dy3 += ey; dt3 += eth
@@ -330,7 +330,7 @@ def main():
             uy,  w_y, P_y = ekf_snpid_freeze(dy1,dy2,dy3, w_y,P_y,Q,Rm, n_y, alpha,uMax[1], freeze_y)
             uth, w_t, P_t = ekf_snpid_freeze(dt1,dt2,dt3, w_t,P_t,Q,Rm, n_th,alpha,uMax[2], freeze_t)
 
-            # --- Freeze/unfreeze por normalización ---
+            # --- Freeze/unfreeze por normalizaciÃ³n ---
             exn = abs(ex); eyn = abs(ey); ethn= abs(eth)
             if (not freeze_x) and (exn < e_thr_freeze): freeze_x=True
             elif freeze_x and (exn > e_thr_unfz):       freeze_x=False
@@ -351,23 +351,23 @@ def main():
             w_cmd = A @ u_vec
             bot.set_wheel_velocities(w_cmd)
 
-            # --------- EJEMPLO: mover Cuboid después de 10 s ---------
+            # --------- EJEMPLO: mover Cuboid despuÃ©s de 10 s ---------
             if t > 10:
                 bot.sim.setObjectPosition(cuboid, -1, [1.2, 2.0, 0.05])
-                # si es dinámico:
+                # si es dinÃ¡mico:
                 try: bot.sim.resetDynamicObject(cuboid)
                 except: pass
 
-            # Si se terminó la ruta y no hay loop, detener y salir:
+            # Si se terminÃ³ la ruta y no hay loop, detener y salir:
             if REF_MODO == "puntos" and wp_finished and not WP_LOOP:
                 bot.stop()
-                print("[INFO] último waypoint alcanzado. Ruta finalizada (loop=False).")
+                print("[INFO] Ãºltimo waypoint alcanzado. Ruta finalizada (loop=False).")
                 break
 
-            # --- Hamiltoniano canónico ---
+            # --- Hamiltoniano canÃ³nico ---
             H = 0.5*m_tot*(ux**2 + uy**2) + 0.5*Iz*(uth**2)
 
-            # --- Predicción de H con TF (si hay modelo) ---
+            # --- PredicciÃ³n de H con TF (si hay modelo) ---
             H_pred_inst = None
             if model is not None:
                 X = np.array([[ux, uy, uth, m_tot]], dtype=np.float32)
@@ -376,7 +376,7 @@ def main():
                     H_pred_inst = float(Hp)
                 except Exception as e:
                     if len(H_pred_list) == 0:
-                        print("[WARN] Falló la predicción con TF en lí­nea. Detalle:", e)
+                        print("[WARN] FallÃ³ la predicciÃ³n con TF en lÃ­Â­nea. Detalle:", e)
                     H_pred_inst = None
 
             # --- Logs ---
@@ -425,7 +425,7 @@ def main():
     else:
         H_pred = None
 
-    # ====== Métricas de H si hay predicción válida ======
+    # ====== MÃ©tricas de H si hay predicciÃ³n vÃ¡lida ======
     if H_pred is not None and np.isfinite(H_pred).any():
         mask = np.isfinite(H_pred) & np.isfinite(H_log)
         if mask.sum() > 5:
@@ -436,13 +436,13 @@ def main():
             r2   = r2_score_np(H_log[mask], H_pred[mask])
             rng  = (H_log[mask].max() - H_log[mask].min()) + 1e-12
             stdH = np.std(H_log[mask]) + 1e-12
-            print(f"[Comparación H] RMSE={rmse:.6e}  MAE={mae:.6e}  R2={r2:.6f}  "
+            print(f"[ComparaciÃ³n H] RMSE={rmse:.6e}  MAE={mae:.6e}  R2={r2:.6f}  "
                   f"NRMSE(range)={rmse/rng:.6e}  NRMSE(std)={rmse/stdH:.6e}")
         else:
-            print("[INFO] Muy pocos puntos válidos para mÃ©tricas de H.")
+            print("[INFO] Muy pocos puntos vÃ¡lidos para mÃƒÂ©tricas de H.")
 
     # -------- GrÃ¡ficas --------
-    plt.figure("Posición vs tiempo", figsize=(8,9))
+    plt.figure("PosiciÃ³n vs tiempo", figsize=(8,9))
     for i, lab in enumerate(['x [m]','y [m]', r'$\theta$ [rad]']):
         ax = plt.subplot(4,1,i+1); ax.grid(True)
         if pd_log.shape[1]>0: ax.plot(t_log, pd_log[i], '--', lw=1.5, label=f'{lab}_d')
@@ -462,7 +462,7 @@ def main():
     
     if REF_MODO == "puntos":
         W = np.array(WAYPOINTS_POSE).T
-        ax.plot(W[0], W[1], 'o-', label='waypoints (con 'r'$\theta$¸)')
+        ax.plot(W[0], W[1], 'o-', label='waypoints (con 'r'$\theta$Â¸)')
         for i,(wx,wy,wth) in enumerate(WAYPOINTS_POSE):
             ax.text(wx, wy, f'{i}', fontsize=8)
     ax.set_xlabel('x [m]'); ax.set_ylabel('y [m]')
@@ -470,17 +470,17 @@ def main():
 
     plt.figure("Control (u_x, u_y, u_theta)", figsize=(9,4))
     plt.grid(True); plt.plot(t_log, ux_log, label='u_x')
-    plt.plot(t_log, uy_log, label='u_y'); plt.plot(t_log, uth_log, label='u_'r'$\theta$¸')
+    plt.plot(t_log, uy_log, label='u_y'); plt.plot(t_log, uth_log, label='u_'r'$\theta$Â¸')
     plt.xlabel('t [s]'); plt.ylabel('control'); plt.legend(loc='best')
 
     plt.figure("Errores", figsize=(9,4))
     plt.grid(True); plt.plot(t_log, ex_log, label='e_x')
-    plt.plot(t_log, ey_log, label='e_y'); plt.plot(t_log, eth_log, label='e_'r'$\theta$¸')
+    plt.plot(t_log, ey_log, label='e_y'); plt.plot(t_log, eth_log, label='e_'r'$\theta$Â¸')
     plt.xlabel('t [s]'); plt.legend(loc='best')
 
     plt.figure("Errores normalizados", figsize=(9,4))
     plt.grid(True); plt.plot(t_log, exn_log, label='e_{x,n}')
-    plt.plot(t_log, eyn_log, label='e_{y,n}'); plt.plot(t_log, ethn_log, label='e_{'r'$\theta$¸,n}')
+    plt.plot(t_log, eyn_log, label='e_{y,n}'); plt.plot(t_log, ethn_log, label='e_{'r'$\theta$Â¸,n}')
     plt.axhline(e_thr_freeze, linestyle='--', label='freeze')
     plt.axhline(e_thr_unfz,   linestyle='--', label='unfreeze')
     plt.xlabel('t [s]'); plt.legend(loc='best')
@@ -494,7 +494,7 @@ def main():
     ax.legend(['Kp_y','Kd_y','Ki_y']); ax.set_title('Y')
     ax=plt.subplot(3,1,3); ax.grid(True)
     if Wt_log.shape[1]>0: ax.plot(t_log, Wt_log[0], t_log, Wt_log[1], t_log, Wt_log[2])
-    ax.legend([r'Kp_'r'$\theta$¸',r'Kd_'r'$\theta$¸',r'Ki_'r'$\theta$¸']); ax.set_title(''r'$\theta$¸'); ax.set_xlabel('t [s]')
+    ax.legend([r'Kp_'r'$\theta$Â¸',r'Kd_'r'$\theta$Â¸',r'Ki_'r'$\theta$Â¸']); ax.set_title(''r'$\theta$Â¸'); ax.set_xlabel('t [s]')
 
     if w_log.shape[1]>0:
         plt.figure("Velocidades de rueda", figsize=(9,4))
@@ -504,19 +504,19 @@ def main():
 
     # ====== Hamiltoniano real vs predicho ======
     plt.figure("Hamiltoniano", figsize=(10,4))
-    plt.grid(True); plt.plot(t_log, H_log, lw=1.2, label='H real (fí­sico)')
+    plt.grid(True); plt.plot(t_log, H_log, lw=1.2, label='H real (fÃ­Â­sico)')
     if H_pred is not None and np.isfinite(H_pred).any():
         plt.plot(t_log, H_pred, '--', label='H predicho (TF)')
-    plt.xlabel('t [s]'); plt.ylabel('Energí­a [J]')
-    plt.title('Hamiltoniano canónico')
+    plt.xlabel('t [s]'); plt.ylabel('EnergÃ­Â­a [J]')
+    plt.title('Hamiltoniano canÃ³nico')
     plt.legend(loc='best')
 
-    # ====== Avance theta”p ======
-    plt.figure("Avance 'r'$\theta$”p", figsize=(9,3))
+    # ====== Avance thetaÂ”p ======
+    plt.figure("Avance 'r'$\theta$Â”p", figsize=(9,3))
     plt.grid(True)
     plt.plot(t_log, dist_log, lw=1.5)
     plt.xlabel('t [s]')
-    plt.ylabel(r'||'r'$\theta$”p||')
+    plt.ylabel(r'||'r'$\theta$Â”p||')
     plt.title('Norma del avance entre pasos (np.linalg.norm(p - p_prev))')
 
     plt.show()
