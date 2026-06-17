@@ -218,7 +218,8 @@ def main():
     REF_MODO = "puntos"
     S        = 15.0  # Maximum simulation duration [s]
 
-    L = 0.1981; l = 0.1990
+    L = 0.2355
+    l = 0.15
 
     # EKF-SNPID initialization
     P_init = np.eye(3); Q = 0.1*np.eye(3); Rm = 1e-4

@@ -1,35 +1,35 @@
-% EKF_SNPID_Youbot_Freeze_PureNorm.m
-% Congelamiento por pura normalización del error (sin ventanas).
-% Histeresis simple: freeze si e_norm < thr_freeze, unfreeze si e_norm > thr_unfz.
+% Evaluates the overall robustness of the proposed EKF-SNPID system 
+% utilizing a pure error normalization hysteresis mechanism.
+% Freezing occurs if the normalized error falls below a minimum threshold, 
+% and unfreezes when it exceeds an upper threshold.
+%
+% Part of the "On-Demand Adaptive PID Control via Neural Networks" framework.
 
 clear; clc; close all;
 
-%% Parámetros del robot (YouBot Mecanum)
-L  = 0.1981;  l  = 0.199;  r  = 0.0475;
-dt = 0.05;    Tsim = 280;
+%% Robot Parameters (YouBot Mecanum)
+L = 0.2355;
+l = 0.15; 
+r = 0.0475;
+dt = 0.05;    
+Tsim = 280;
 N  = round(Tsim/dt);
 
-% Parámetros 
-m_base = 16;          % kg, masa del chasis
-m_w    = 2;           % kg por rueda
-m_L    = 0;           % kg, carga centrada
-a_box  = 0.30;   % m, largo de la caja (en planta) si aplica
-b_box  = 0.25;   % m, ancho de la caja (en planta) si aplica
+% Mass Parameters
+m_base = 16;          % Chassis mass [kg]
+m_w    = 2;           % Wheel mass [kg per wheel]
+m_L    = 0;           % Centered payload mass [kg]
+a_box  = 0.30;        % Box length [m] (if applicable)
+b_box  = 0.25;        % Box width [m] (if applicable)
 
-%% Referencia (sinusoidal) + pausa dura
+%% Reference Trajectory (Sinusoidal) + Hard Pause
 t_original = (0:N-1)*dt;
 xref_original  = 0.2 * t_original;
 yref_original  = 0.4 * sin(0.2*t_original);
 thref_original = -pi/8 * ones(1,N);
 
-%Trayectoria “rosa” con offset:
-% a    = 1 + 0.5*cos(5*0.05*t_original);
-% xref_original = a .* cos(0.05*t_original)-1.5;
-% yref_original = a .* sin(0.05*t_original);
-% thref_original= pi/4 * ones(1,N);
-
-pause_start    = 35;   % s
-pause_duration = 0;   % s
+pause_start    = 35;  % [s]
+pause_duration = 0;   % [s]
 idx_start = round(pause_start/dt);
 idx_pause = round(pause_duration/dt);
 idx_end   = idx_start + idx_pause;
@@ -45,7 +45,7 @@ thref= [thref_original(1:idx_start), repmat(th_hold,1,idx_pause), thref_original
 t = (0:length(xref)-1)*dt;
 N = length(t);
 
-%% EKF-SNPID
+%% EKF-SNPID Initialization
 P_init = eye(3);
 Q      = 0.1 * eye(3);
 R      = 1e-4;
@@ -57,58 +57,50 @@ n_th = [0.1; 0.1; 0.01];
 alpha = 1.5;
 uMax  = [1.5; 1.5; 1.5];
 
-%% Pura normalización (sin ventanas)
-e_norm_thr_freeze = 0.05;   % congela si e_norm < 5%
-e_norm_thr_unfz   = 0.1;   % descongela si e_norm > 15%  (debe ser > freeze)
+%% Pure Normalization Thresholds (Windowless)
+e_norm_thr_freeze = 0.05;   % Freeze if e_norm < 5%
+e_norm_thr_unfz   = 0.1;    % Unfreeze if e_norm > 10%
 
-%% Estados e históricos
+%% State and History Allocation
 state = zeros(3,N); state(:,1) = [0;0;0];
 ux = zeros(1,N); uy = zeros(1,N); uth = zeros(1,N);
 ex = zeros(1,N); ey = zeros(1,N); eth = zeros(1,N);
 W_x = zeros(3,N); W_y = zeros(3,N); W_t = zeros(3,N);
 pp = zeros(1,N); p_step = 0;
 
-% Normalizados (para plots/depuración)
+% Normalized errors (for plotting/debugging)
 exn = zeros(1,N); eyn = zeros(1,N); ethn = zeros(1,N);
 
-% Inicialización de pesos
+% Weight Initialization
 w_x = [0; 0; 0];
 w_y = [0; 0; 0];
 w_t = [0; 0; 0];
-
-% w_x = [0.44; 0.16; 0.13];
-% w_y = [3.9; 0.1; 0.4];
-% w_t = [9.4; -.9; 1.1];
-
-% w_x = [1.228; -0.06; 0.031];
-% w_y = [0.8; -.04; .035];
-% w_t = [1.54; -.14; .112];
 
 P_x = P_init; W_x(:,1) = w_x;
 P_y = P_init; W_y(:,1) = w_y;
 P_t = P_init; W_t(:,1) = w_t;
 
-% Integrales discretas (protegidas)
+% Protected Discrete Integrals
 dx3 = 0; dy3 = 0; dt3 = 0;
 
-% Flags de congelamiento por eje
+% Axis Freeze Flags
 freeze_x=false; freeze_y=false; freeze_t=false;
 
-%% Bucle
+%% Main Simulation Loop
 for k = 2:N
     xk = state(1,k-1); yk = state(2,k-1); th = state(3,k-1);
-
+    
     ex(k)  = xref(k) - xk;
     ey(k)  = yref(k) - yk;
     eth(k) = wrapToPi_local(thref(k) - th);
-
-    % Componentes P, D, I
+    
+    % P, D, I Components
     dx1 = ex(k);               dx2 = ex(k) - ex(k-1);
     dy1 = ey(k);               dy2 = ey(k) - ey(k-1);
     dt1 = eth(k);              dt2 = eth(k) - eth(k-1);
-
-    % Integrales: evita acumular si no hay avance (para k>=3)
-    if k>=3
+    
+    % Integral Calculation (prevents accumulation without progression)
+    if k >= 3
         p_step = norm(state(:,k-1) - state(:,k-2));
         if p_step > 1e-12
             dx3 = dx3 + ex(k);
@@ -120,45 +112,44 @@ for k = 2:N
         dy3 = dy3 + ey(k);
         dt3 = dt3 + eth(k);
     end
-
-    % Control + EKF (con freeze por eje)
-    [ux(k), w_x, P_x] = ekf_snpid_freeze(dx1,dx2,dx3, w_x, P_x, Q, R, n_x, alpha, uMax(1), freeze_x);
-    [uy(k), w_y, P_y] = ekf_snpid_freeze(dy1,dy2,dy3, w_y, P_y, Q, R, n_y, alpha, uMax(2), freeze_y);
-    [uth(k),w_t, P_t] = ekf_snpid_freeze(dt1,dt2,dt3, w_t, P_t, Q, R, n_th,alpha, uMax(3), freeze_t);
-
-    % Dinámica con bloqueo en la pausa
+    
+    % Control Law + EKF Update (with axis freezing)
+    [ux(k), w_x, P_x] = ekf_snpid_freeze(dx1, dx2, dx3, w_x, P_x, Q, R, n_x, alpha, uMax(1), freeze_x);
+    [uy(k), w_y, P_y] = ekf_snpid_freeze(dy1, dy2, dy3, w_y, P_y, Q, R, n_y, alpha, uMax(2), freeze_y);
+    [uth(k),w_t, P_t] = ekf_snpid_freeze(dt1, dt2, dt3, w_t, P_t, Q, R, n_th, alpha, uMax(3), freeze_t);
+    
+    % Dynamics (incorporating hard pause block)
     if k >= idx_start && k < idx_end
-    % if k > 305 && k < 1000
         state(:,k) = state(:,k-1);
-        m_L    = 1;
+        m_L = 1;
     else
         state(:,k) = state(:,k-1) + dt * [ux(k); uy(k); uth(k)];
     end
-
-    % Log de pesos
+    
+    % Weight Logging
     W_x(:,k) = w_x; W_y(:,k) = w_y; W_t(:,k) = w_t;
     pp(:, k) = p_step;
-
-    % ===== Congelamiento (histeresis simple) =====
+    
+    % ===== Simple Hysteresis Freezing =====
     exn(k)  = abs(ex(k));
     eyn(k)  = abs(ey(k));
     ethn(k) = abs(eth(k));
-
-    % X
+    
+    % X-Axis
     if ~freeze_x && (exn(k) < e_norm_thr_freeze)
         freeze_x = true;
     elseif freeze_x && (exn(k) > e_norm_thr_unfz)
         freeze_x = false;
     end
-
-    % Y
+    
+    % Y-Axis
     if ~freeze_y && (eyn(k) < e_norm_thr_freeze)
         freeze_y = true;
     elseif freeze_y && (eyn(k) > e_norm_thr_unfz)
         freeze_y = false;
     end
-
-    % THETA
+    
+    % Theta-Axis
     if ~freeze_t && (ethn(k) < e_norm_thr_freeze)
         freeze_t = true;
     elseif freeze_t && (ethn(k) > e_norm_thr_unfz)
@@ -166,112 +157,72 @@ for k = 2:N
     end
 end
 
-%% ===== Hamiltoniano (m_base=16 kg, m_rueda=2 kg c/u) =====
-
+%% ===== Canonical Hamiltonian Computation =====
 m_tot = m_base + 4*m_w + m_L;
-
-Iz_chasis = (1/3) * m_base * (L^2 + l^2);                     % placa de 2L x 2l
-Iz_rueda  = m_w * (L^2 + l^2) + 0.25 * m_w * r^2;             % por rueda
+Iz_chasis = (1/3) * m_base * (L^2 + l^2);                     
+Iz_rueda  = m_w * (L^2 + l^2) + 0.25 * m_w * r^2;             
 Iz        = Iz_chasis + 4 * Iz_rueda;
 
-vx = ux; vy = uy; w = uth;                                    % en este modelo, u ≈ velocidades
-H  = 0.5 * m_tot .* (vx.^2 + vy.^2) + 0.5 * Iz .* (w.^2);     % J
-
-%% ===== Hamiltoniano con carga centrada (paramétrico) =====
-% include_wheel_spin   = true;   % energía de giro de ruedas (opcional)
-% use_load_box_inertia = false;   % true: la carga tiene inercia propia; false: punto centrado
-% 
-% m_tot = m_base + 4*m_w + m_L;
-% 
-% % Inercia alrededor de z (sin doble contabilidad del giro de ruedas)
-% Izz_chasis_CoM = (1/3) * m_base * (L^2 + l^2);
-% Izz_wheels_loc = 4 * m_w * (L^2 + l^2);  % ruedas como masas en las esquinas (±L,±l)
-% 
-% if use_load_box_inertia
-%     Izz_load_CoM = (1/12) * m_L * (a_box^2 + b_box^2);  % caja delgada centrada
-% else
-%     Izz_load_CoM = 0;  % carga como punto centrado
-% end
-% 
-% Iz_tot = Izz_chasis_CoM + Izz_wheels_loc + Izz_load_CoM;
-% 
-% % Velocidades del cuerpo (en tu modelo u ≈ twist del cuerpo)
-% vx = ux; vy = uy; w = uth;
-% 
-% % Energía del cuerpo (traslación + rotación)
-% H_body = 0.5 * m_tot .* (vx.^2 + vy.^2) + 0.5 * Iz_tot .* (w.^2);
-% 
-% % Energía de giro de ruedas (opcional, usando inversa mecanum típica)
-% if include_wheel_spin
-%     a = (L + l);
-%     w1 = (1/r) * (vx - vy - a .* w);
-%     w2 = (1/r) * (vx + vy + a .* w);
-%     w3 = (1/r) * (vx + vy - a .* w);
-%     w4 = (1/r) * (vx - vy + a .* w);
-%     Iw = 0.5 * m_w * r^2;    % disco sólido aprox. sobre su propio eje
-%     H_spin = 0.5 * Iw .* (w1.^2 + w2.^2 + w3.^2 + w4.^2);
-% else
-%     H_spin = zeros(size(H_body));
-% end
-% 
-% % Hamiltoniano total
-% H = H_body + H_spin;
-
+vx = ux; vy = uy; w = uth;                                    
+H  = 0.5 * m_tot .* (vx.^2 + vy.^2) + 0.5 * Iz .* (w.^2);     
 
 %% Plots
-figure;
+figure('Name','XY Plane','NumberTitle','off');
 plot(state(1,:), state(2,:), 'b', xref, yref, '--r'); grid on;
-xlabel('x [m]'); ylabel('y [m]'); legend('Real','Ref','Location','best'); title('Plano XY');
+xlabel('x [m]'); ylabel('y [m]'); legend('Real','Reference','Location','best'); title('XY Trajectory');
 
-figure;
-plot(t, ex, t, ey, t, eth); grid on; legend('e_x','e_y','e_\theta'); xlabel('t [s]'); title('Errores');
+figure('Name','Errors','NumberTitle','off');
+plot(t, ex, t, ey, t, eth); grid on; 
+legend('e_x','e_y','e_{\theta}'); xlabel('t [s]'); title('Tracking Errors');
 
-figure;
-plot(t, ux, t, uy, t, uth); grid on; legend('u_x','u_y','u_\theta'); xlabel('t [s]'); title('Control');
+figure('Name','Control Signals','NumberTitle','off');
+plot(t, ux, t, uy, t, uth); grid on; 
+legend('u_x','u_y','u_{\theta}'); xlabel('t [s]'); title('Control Action');
 
-figure;
+figure('Name','Normalized Errors','NumberTitle','off');
 plot(t, exn, t, eyn, t, ethn); grid on; hold on;
-yline(e_norm_thr_freeze,'--k','freeze'); yline(e_norm_thr_unfz,'--r','unfreeze');
+yline(e_norm_thr_freeze,'--k','Freeze Threshold'); yline(e_norm_thr_unfz,'--r','Unfreeze Threshold');
 legend('e_{x,n}','e_{y,n}','e_{\theta,n}','Location','best');
-xlabel('t [s]'); title('Errores normalizados (con histéresis)');
+xlabel('t [s]'); title('Normalized Errors (Hysteresis Bounds)');
 
-figure('Name','Ganancias','NumberTitle','off');
-subplot(3,1,1); plot(t,W_x(1,:), t,W_x(2,:), t,W_x(3,:)); grid on; legend('Kp_x','Ki_x','Kd_x'); title('X');
-subplot(3,1,2); plot(t,W_y(1,:), t,W_y(2,:), t,W_y(3,:)); grid on; legend('Kp_y','Ki_y','Kd_y'); title('Y');
-subplot(3,1,3); plot(t,W_t(1,:), t,W_t(2,:), t,W_t(3,:)); grid on; legend('Kp_\theta','Ki_\theta','Kd_\theta'); title('\theta');
+figure('Name','Learned Gains','NumberTitle','off');
+subplot(3,1,1); plot(t,W_x(1,:), t,W_x(2,:), t,W_x(3,:)); grid on; legend('Kp_x','Ki_x','Kd_x'); title('X-Axis');
+subplot(3,1,2); plot(t,W_y(1,:), t,W_y(2,:), t,W_y(3,:)); grid on; legend('Kp_y','Ki_y','Kd_y'); title('Y-Axis');
+subplot(3,1,3); plot(t,W_t(1,:), t,W_t(2,:), t,W_t(3,:)); grid on; legend('Kp_{\theta}','Ki_{\theta}','Kd_{\theta}'); title('\theta');
 
-figure('Name','Hamiltoniano','NumberTitle','off');
+figure('Name','Canonical Hamiltonian','NumberTitle','off');
 plot(t, H, 'LineWidth',1.2); grid on;
-xlabel('t [s]'); ylabel('Energía [J]');
-title('Hamiltoniano (m_{base}=16 kg, m_{rueda}=2 kg c/u)');
+xlabel('t [s]'); ylabel('Energy [J]');
+title('Canonical Hamiltonian (m_{base}=16 kg, m_{wheel}=2 kg c/u)');
 
-figure();
-plot(t,pp)
-title('Cambio de pose');
+figure('Name','Pose Change','NumberTitle','off');
+plot(t,pp); grid on;
+xlabel('t [s]'); ylabel('||\Delta p||');
+title('Pose Step Magnitude');
 
-%% ===== Funciones =====
-function [u_sat, w_new, P_new] = ekf_snpid_freeze(x1,x2,x3, w, P, Q, R, n, alpha, umax, freeze_flag)
+%% ===== Subroutines =====
+function [u_sat, w_new, P_new] = ekf_snpid_freeze(x1, x2, x3, w, P, Q, R, n, alpha, umax, freeze_flag)
     x = [x1; x2; x3];
     v = w' * x;
     u = alpha * tanh(v);
-
-    % Anti-windup por back-calculation simple
+    
+    % Simple back-calculation anti-windup
     u_sat = max(-umax, min(umax, u));
     es    = u_sat - u;
-    e_aw  = x1 + es;  % innovación simple
-
-    % Jacobiano y covarianza de innovación
+    e_aw  = x1 + es;  
+    
+    % Jacobian and innovation covariance
     sech2 = (1 - tanh(v)^2);
-    H = alpha * sech2 * x;
-    S = H' * P * H + R;
-
+    H_jac = alpha * sech2 * x;
+    S = H_jac' * P * H_jac + R;
+    
     if freeze_flag
         w_new  = w; P_new = P; return;
     end
-
-    % EKF update
-    K     = (P * H) / S;
-    P_new = P - K * H' * P + Q;
+    
+    % EKF Update
+    K     = (P * H_jac) / S;
+    P_new = P - K * H_jac' * P + Q;
     w_new = w + (n .* K) * e_aw;
 end
 

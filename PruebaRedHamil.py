@@ -214,7 +214,8 @@ def main():
     REF_MODO = "rosa"  
     S        = 180.0             # Total simulation duration [s]
 
-    L = 0.1981; l = 0.1990
+    L = 0.2355
+    l = 0.15
 
     # EKF-SNPID Initialization
     P_init = np.eye(3); Q = 0.1*np.eye(3); Rm = 1e-4
