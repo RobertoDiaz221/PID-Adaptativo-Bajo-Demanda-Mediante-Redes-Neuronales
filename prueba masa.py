@@ -1,41 +1,46 @@
-# ZMQ + EKF-SNPID (freeze/histeresis) + referencias "sinusoidal" y "rosa" + gráficas
-# + PREDICCIÓN DE HAMILTONIANOC(comparación con H fí­sico)
-# + CAMBIO DE MASA DE CUBOID (m_L) EN TIEMPO DE SIMULACIÓN
-# + DESCONGELAR GANANCIAS CUANDO |H_pred - H_real| EXCEDE UMBRAL
+# -*- coding: utf-8 -*-
+"""
+ZMQ + EKF-SNPID Controller with Hysteresis Freeze and Hamiltonian Prediction.
+Includes dynamic payload switching during simulation and gain unfreezing 
+triggered by absolute/relative Hamiltonian discrepancies.
+"""
 
-import time, math, sys, os
+import time
+import math
+import sys
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-# ======================= Config carga (cuboid) =======================
+# --- Load Configuration (Cuboid) ---
 CUBOID_PATH   = '/Cuboid'   
-ML_INIT       = 0.0         # masa inicial del load 
-ML_NEW        = 20.0         # masa nueva del load cuando "aparece"
-ML_SWITCH_T   = None        # None => mitad de S; o pon un float (segundos)
-ML_EPS        = 1e-6        # fallback si el motor no acepta 0.0 exacto
+ML_INIT       = 0.0               # Initial load mass [kg]
+ML_NEW        = 20.0              # Switched load mass [kg]
+ML_SWITCH_T   = None              # Time of mass switch (None = S/2)
+ML_EPS        = 1e-6              # Fallback epsilon for minimum mass
 
-# =================== Config disparador por Hamiltoniano ===================
-H_DIFF_ABS_THR = 0.5        # [J] umbral absoluto de discrepancia |H_pred - H_real|
-H_DIFF_REL_THR = 0.25       # [adim] umbral relativo vs |H_real|
-H_EPS_DEN      = 1e-6       # para evitar división por 0 en relativo
-UNFREEZE_H_HOLD = 3.0       # [s] mantener descongelado tras disparo por H
-PLOT_SWITCH_MARK = True     # marcar t_switch y eventos H en gráficas
+# --- Hamiltonian Trigger Configuration ---
+H_DIFF_ABS_THR = 0.5              # Absolute discrepancy threshold |H_pred - H_real| [J]
+H_DIFF_REL_THR = 0.25             # Relative discrepancy threshold vs |H_real|
+H_EPS_DEN      = 1e-6             # Epsilon to prevent division by zero
+UNFREEZE_H_HOLD = 3.0             # Duration to hold unfreeze after H-trigger [s]
+PLOT_SWITCH_MARK = True           # Mark switch and H events on plots
 
-# -------- Cliente ZMQ --------
+# --- ZMQ Client ---
 try:
     from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 except ImportError:
-    print("[ERROR] Instala:  pip install coppeliasim-zmqremoteapi-client")
+    print("[ERROR] Missing dependency. Please run: pip install coppeliasim-zmqremoteapi-client")
     sys.exit(1)
 
-# -------- TensorFlow --------
+# --- TensorFlow Backend ---
 TF_AVAILABLE = True
 try:
     import tensorflow as tf
     from tensorflow import keras
     from tensorflow.keras import backend as K
 except Exception as e:
-    print("[WARN] TensorFlow no disponible, solo se graficará H fí­sico. Detalle:", e)
+    print(f"[WARNING] TensorFlow not available. Physical H will be plotted exclusively. Details: {e}")
     TF_AVAILABLE = False
 
 MODEL_PATH = "hamiltonian_tf_model.keras"
@@ -52,10 +57,10 @@ def _load_tf_model(path):
     if not TF_AVAILABLE:
         return None
     if not os.path.exists(path):
-        print("[INFO] No se encontró el modelo TF para H:", path)
+        print(f"[INFO] TF model for H not found: {path}")
         return None
     try:
-        print(f"[OK] Cargando modelo TF (safe_mode=False): {path}")
+        print(f"[OK] Loading TF model (safe_mode=False): {path}")
         return keras.models.load_model(
             path,
             custom_objects={"rmse_keras": rmse_keras, "r2_keras": r2_keras},
@@ -63,17 +68,16 @@ def _load_tf_model(path):
         )
     except TypeError:
         try:
-            print("[INFO] Reintentando con enable_unsafe_deserialization()")
             keras.config.enable_unsafe_deserialization()
         except Exception:
             pass
-        print(f"[OK] Cargando modelo TF (modo inseguro): {path}")
+        print(f"[OK] Loading TF model (unsafe mode): {path}")
         return keras.models.load_model(
             path,
             custom_objects={"rmse_keras": rmse_keras, "r2_keras": r2_keras}
         )
     except Exception as e:
-        print("[WARN] Falló la carga del modelo TF. Detalle:", e)
+        print(f"[WARNING] Failed to load TF model. Details: {e}")
         return None
 
 def r2_score_np(y, yhat):
@@ -81,8 +85,9 @@ def r2_score_np(y, yhat):
     ss_tot = np.sum((y - np.mean(y))**2)
     return 1.0 - ss_res / (ss_tot + 1e-12)
 
-# -------- Utilidades --------
-def wrap_angle(a): return math.atan2(math.sin(a), math.cos(a))
+# --- Utilities ---
+def wrap_angle(a): 
+    return math.atan2(math.sin(a), math.cos(a))
 
 def draw_robot_ax(ax, pose, L, l, color='C1'):
     x, y, th = pose
@@ -93,34 +98,33 @@ def draw_robot_ax(ax, pose, L, l, color='C1'):
     tip = np.array([x+0.25*math.cos(th), y+0.25*math.sin(th)])
     ax.arrow(x, y, tip[0]-x, tip[1]-y, head_width=0.05, length_includes_head=True, color=color)
 
-# -------- Envoltura YouBot --------
+# --- YouBot Wrapper ---
 class YouBot:
     def __init__(self, host='127.0.0.1', port=23000, wheel_radius=0.10, w_min=-2.5, w_max=2.5):
         self.r = wheel_radius
         self.w_min = np.full(4, w_min, float)
         self.w_max = np.full(4, w_max, float)
-        print("[INFO] Conectando a CoppeliaSim (ZMQ)...")
+        print("[INFO] Connecting to CoppeliaSim via ZMQ...")
         self.client = RemoteAPIClient(host=host, port=port)
         self.sim = self.client.getObject('sim')
-        print("[OK] Conectado.")
-        print("[INFO] Obteniendo handles...")
+        print("[OK] Connected.")
+        
         self.youBot   = self.sim.getObject('/youBot')
         self.motor_fl = self.sim.getObject('/youBot/rollingJoint_fl')
         self.motor_fr = self.sim.getObject('/youBot/rollingJoint_fr')
         self.motor_rl = self.sim.getObject('/youBot/rollingJoint_rl')
         self.motor_rr = self.sim.getObject('/youBot/rollingJoint_rr')
-        # Cubo (carga)
+        
         try:
             self.cuboid = self.sim.getObject(CUBOID_PATH)
-            print(f"[OK] Cuboid: {CUBOID_PATH}")
+            print(f"[OK] Cuboid linked: {CUBOID_PATH}")
         except Exception as e:
             self.cuboid = None
-            print(f"[WARN] No se encontró el cuboid en ruta {CUBOID_PATH}. Detalle:", e)
-        print("[OK] Handles listos.")
+            print(f"[WARNING] Cuboid not found at {CUBOID_PATH}. Details: {e}")
 
     def get_pose(self):
         p = self.sim.getObjectPosition(self.youBot, -1)
-        o = self.sim.getObjectOrientation(self.youBot, -1)  # [ax,ay,az]
+        o = self.sim.getObjectOrientation(self.youBot, -1)
         return np.array([float(p[0]), float(p[1]), float(o[2])], float)
 
     def set_wheel_velocities(self, w):
@@ -131,10 +135,11 @@ class YouBot:
         self.sim.setJointTargetVelocity(self.motor_rl, float(-w[2]))
         self.sim.setJointTargetVelocity(self.motor_rr, float(-w[3]))
 
-    def stop(self): self.set_wheel_velocities([0,0,0,0])
+    def stop(self): 
+        self.set_wheel_velocities([0,0,0,0])
 
-# -------- EKF-SNPID (freeze/histeresis) --------
-def ekf_snpid_freeze(x1,x2,x3, w,P,Q,R, n,alpha, umax, freeze_flag):
+# --- EKF-SNPID Core ---
+def ekf_snpid_freeze(x1, x2, x3, w, P, Q, R, n, alpha, umax, freeze_flag):
     x = np.array([x1,x2,x3], float)
     v = float(w @ x)
     u = alpha * np.tanh(v)
@@ -144,43 +149,44 @@ def ekf_snpid_freeze(x1,x2,x3, w,P,Q,R, n,alpha, umax, freeze_flag):
     sech2 = 1.0 - np.tanh(v)**2
     H = (alpha * sech2) * x
     S = float(H @ (P @ H) + R)
+    
     if freeze_flag:
         return u_sat, w.copy(), P.copy()
+        
     Kf     = (P @ H) / S
     P_new  = (np.eye(3) - np.outer(Kf, H)) @ P + Q
     w_new  = w + (n * Kf) * e_aw
     return u_sat, w_new, P_new
 
-# -------- Referencias ORIGINALES --------
-def ref_original(t, modo):
+# --- Reference Trajectories ---
+def ref_original(t, mode):
     """
-    Devuelve (xd, yd, thetad) usando exactamente las fÃ³rmulas originales.
-    modos: "sinusoidal" | "rosa"
+    Returns (xd, yd, thetad) using original base formulas.
+    Modes: "sinusoidal" | "rosa"
     """
-    if modo == "sinusoidal":
+    if mode == "sinusoidal":
         xd  = 0.1 * t
         yd  = 0.4 * math.sin(0.5 * t)
         thd = -math.pi/8
         return xd, yd, thd
-    elif modo == "rosa":
+    elif mode == "rosa":
         a   = 0.2 + 0.05*math.cos(5*0.05*t)
         xd  = a * math.cos(0.05*t) - 0.25
         yd  = a * math.sin(0.05*t)
         thd = math.pi/4
         return xd, yd, thd
     else:
-        raise ValueError("Modo de referencia no válido. Usa 'sinusoidal' o 'rosa'.")
+        raise ValueError("Invalid reference mode. Use 'sinusoidal' or 'rosa'.")
 
-# -------- Main --------
+# --- Main Execution ---
 def main():
-    # ===== Selección de referencia =====
-    REF_MODO = "sinusoidal"   # "sinusoidal" | "rosa"
-    S        = 80.0     # duración [s]
+    REF_MODO = "sinusoidal"
+    S        = 80.0  # Total simulation duration [s]
 
-    # ===== Geometrí­a YouBot =====
+    # YouBot Geometry
     L = 0.1981; l = 0.1990
 
-    # ===== EKF-SNPID params =====
+    # EKF-SNPID initialization
     P_init = np.eye(3); Q = 0.1*np.eye(3); Rm = 1e-4
     n_x  = np.array([0.1, 0.1, 0.01])
     n_y  = np.array([0.1, 0.1, 0.01])
@@ -188,71 +194,56 @@ def main():
     alpha = 1.5
     uMax  = np.array([1.5, 1.5, 1.5])
 
-    # Freeze por normalización (histeresis)
-    e_thr_freeze=0.05; e_thr_unfz=0.10
+    # Hysteresis normalization bounds
+    e_thr_freeze = 0.05; e_thr_unfz = 0.10
 
-    # Pesos iniciales
-    w_x = np.array([0, 0, 0])
-    w_y = np.array([0, 0, 0])
-    w_t = np.array([0, 0, 0])
-    
+    # Initial weights
     w_x = np.array([0.23, 0, 0.06])
     w_y = np.array([2.5, 0.05, 0.02])
     w_t = np.array([1.5, 0.08, 0.02])
-    
-    # Pesos prueba
-    # w_x = np.array([1.25, -0.05, 0.08])
-    # w_y = np.array([8.0, 0.1, 0.2])
-    # w_t = np.array([3.5, 0.001, 0.2])
 
     P_x = P_init.copy(); P_y = P_init.copy(); P_t = P_init.copy()
 
-    # Integrales protegidas
-    dx3=0.0; dy3=0.0; dt3=0.0
-    freeze_x=False; freeze_y=False; freeze_t=False
+    # Protected integrals
+    dx3 = 0.0; dy3 = 0.0; dt3 = 0.0
+    freeze_x = False; freeze_y = False; freeze_t = False
 
-    # ===== Conexión =====
     bot = YouBot(port=23000, wheel_radius=0.10, w_min=-2.5, w_max=2.5)
     bot.stop(); time.sleep(0.05)
 
-    # ===== Carga (m_L) y masa del cuboid =====
-    # Hamiltoniano (parámetros "base" y ruedas)
-    m_base=20.0; m_w=1.0; r_w=0.0475  # constantes
+    # Base parameters for Hamiltonian
+    m_base = 20.0; m_w = 1.0; r_w = 0.0475 
 
-    # m_L (load) gobernado por el cuboid: iniciamos a ML_INIT (o epsilon si no acepta 0)
     m_L = ML_INIT
     if bot.cuboid is not None:
         try:
             bot.sim.setShapeMass(bot.cuboid, ML_INIT)
         except Exception as e:
-            print("[WARN] El motor no aceptó masa=0. Uso epsilon.", e)
+            print(f"[WARNING] Engine rejected 0 mass. Using epsilon. Details: {e}")
             bot.sim.setShapeMass(bot.cuboid, ML_EPS)
             m_L = ML_EPS
     else:
-        print("[WARN] Sin cuboid en la escena: m_L será sólo interno.")
+        print("[WARNING] Cuboid missing from scene: m_L tracking will be internal only.")
 
-    # Tiempo de cambio de masa
     t_switch = (S*0.5) if (ML_SWITCH_T is None) else float(ML_SWITCH_T)
     mass_switched = False
 
-    # ===== Logs =====
+    # Logging structures
     t_log=[]; p_log=[]; pd_log=[]; w_log=[]
     ux_log=[]; uy_log=[]; uth_log=[]
     ex_log=[]; ey_log=[]; eth_log=[]
     exn_log=[]; eyn_log=[]; ethn_log=[]
     Wx_log=[]; Wy_log=[]; Wt_log=[]; H_log=[]
-    H_pred_list = []  # para H predicho si hay modelo
+    H_pred_list = []  
     switch_time_logged = None
-    h_unfreeze_events = []  # tiempos en que se disparó el unfreeze por H
+    h_unfreeze_events = [] 
 
-    # ===== Preparar modelo TF (si existe) =====
     model = _load_tf_model(MODEL_PATH) if TF_AVAILABLE else None
 
-    print(f"[INFO] EKF-SNPID con referencia '{REF_MODO}' (sin pausa).")
-    t0 = time.time(); t_prev=None; p_prev=None;
+    print(f"[INFO] EKF-SNPID starting with reference: '{REF_MODO}'.")
+    t0 = time.time(); t_prev=None; p_prev=None
     ex_prev=0.0; ey_prev=0.0; eth_prev=0.0
 
-    # Hold para mantener descongelado tras disparo por H
     hold_unfreeze_until = 0.0
 
     try:
@@ -260,48 +251,40 @@ def main():
             t = time.time() - t0
             if t > S: break
 
-            # --- Referencia ORIGINAL ---
             xd, yd, thd = ref_original(t, REF_MODO)
-
-            # --- Estado actual ---
             p = bot.get_pose(); xk, yk, th = p
 
-            # --- Errores (mundo) ---
             ex  = xd - xk
             ey  = yd - yk
             eth = wrap_angle(thd - th)
 
-            # Derivadas discretas
             dx1, dy1, dt1 = ex, ey, eth
             dx2, dy2, dt2 = ex-ex_prev, ey-ey_prev, eth-eth_prev
 
-            # Integrales: sólo si hay avance
             if t_prev is not None and p_prev is not None:
                 if np.linalg.norm(p - p_prev) > 1e-12:
                     dx3 += ex; dy3 += ey; dt3 += eth
             else:
                 dx3 += ex; dy3 += ey; dt3 += eth
 
-            # --- EKF-SNPID por eje ---
             ux,  w_x, P_x = ekf_snpid_freeze(dx1,dx2,dx3, w_x,P_x,Q,Rm, n_x, alpha,uMax[0], freeze_x)
             uy,  w_y, P_y = ekf_snpid_freeze(dy1,dy2,dy3, w_y,P_y,Q,Rm, n_y, alpha,uMax[1], freeze_y)
             uth, w_t, P_t = ekf_snpid_freeze(dt1,dt2,dt3, w_t,P_t,Q,Rm, n_th,alpha,uMax[2], freeze_t)
 
-            # --- Freeze/unfreeze por normalización (con hold si aplica) ---
             exn = abs(ex); eyn = abs(ey); ethn = abs(eth)
 
             if t < hold_unfreeze_until:
-                # durante el hold, forzar descongelado para permitir readaptación
                 freeze_x = freeze_y = freeze_t = False
             else:
                 if (not freeze_x) and (exn < e_thr_freeze): freeze_x=True
                 elif freeze_x and (exn > e_thr_unfz):       freeze_x=False
+                
                 if (not freeze_y) and (eyn < e_thr_freeze): freeze_y=True
                 elif freeze_y and (eyn > e_thr_unfz):       freeze_y=False
+                
                 if (not freeze_t) and (ethn < e_thr_freeze): freeze_t=True
                 elif freeze_t and (ethn > e_thr_unfz):       freeze_t=False
 
-            # --- Mapeo a ruedas (alpha = theta + pi/4) ---
             alpha_m = th + math.pi/4.0
             A = np.array([
                 [ math.sqrt(2)*math.sin(alpha_m), -math.sqrt(2)*math.cos(alpha_m), -(L+l)],
@@ -313,61 +296,56 @@ def main():
             w_cmd = A @ u_vec
             bot.set_wheel_velocities(w_cmd)
 
-            # --- Masa total e inercia con la m_L vigente (antes del H) ---
             m_tot = m_base + 4*m_w + m_L
             Iz_chasis = (1/3)*m_base*(L**2 + l**2)
             Iz_rueda  = m_w*(L**2 + l**2) + 0.25*m_w*(r_w**2)
             Iz        = Iz_chasis + 4*Iz_rueda
 
-            # --- Hamiltoniano canónico ---
             H = 0.5*m_tot*(ux**2 + uy**2) + 0.5*Iz*(uth**2)
 
-            # =================== CAMBIO DE MASA ===================
+            # --- Dynamic Mass Switching ---
             if (not mass_switched) and (t >= t_switch):
                 if bot.cuboid is not None:
                     try:
                         bot.sim.setShapeMass(bot.cuboid, ML_NEW)
-                        print(f"[INFO] m_L cambió de {m_L:.6f} a {ML_NEW:.6f} kg @ t={t:.2f}s")
+                        print(f"[INFO] Load mass (m_L) changed from {m_L:.6f} to {ML_NEW:.6f} kg @ t={t:.2f}s")
                         m_L = ML_NEW
                     except Exception as e:
-                        print("[WARN] Falló setShapeMass; actualizo solo m_L interno. Detalle:", e)
+                        print(f"[WARNING] setShapeMass failed. Details: {e}")
                         m_L = ML_NEW
                 else:
                     m_L = ML_NEW
-                    print(f"[INFO] m_L interno cambió a {m_L:.6f} kg @ t={t:.2f}s (sin cuboid)")
+                    print(f"[INFO] Internal load mass changed to {m_L:.6f} kg @ t={t:.2f}s (no cuboid)")
                 mass_switched = True
-                switch_time_logged = t  # para marcar en gráficas
+                switch_time_logged = t  
 
-                # Recalcular m_tot para que la predicción TF use la masa nueva
                 m_tot = m_base + 4*m_w + m_L
-            # ===========================================================
 
-            # --- Predicción de H con TF (si hay modelo) ---
+            # --- Hamiltonian Prediction ---
             H_pred_inst = None
             if model is not None:
-                X = np.array([[ux, uy, uth, m_tot]], dtype=np.float32)  # m_tot ya actualizado si cambió
+                X = np.array([[ux, uy, uth, m_tot]], dtype=np.float32) 
                 try:
                     Hp = model.predict(X, verbose=0).ravel()[0]
                     H_pred_inst = float(Hp)
                 except Exception as e:
                     if len(H_pred_list) == 0:
-                        print("[WARN] Falló la predicción con TF en lí­nea. Detalle:", e)
+                        print(f"[WARNING] Online TF prediction failed. Details: {e}")
                     H_pred_inst = None
 
-            # --- Disparador por discrepancia de H: forzar UNFREEZE + HOLD ---
+            # --- Hamiltonian Discrepancy Trigger ---
             if H_pred_inst is not None and np.isfinite(H_pred_inst):
                 diff_abs = abs(H_pred_inst - H)
                 denom    = max(abs(H), H_EPS_DEN)
                 diff_rel = diff_abs / denom
+                
                 if (diff_abs > H_DIFF_ABS_THR) or (diff_rel > H_DIFF_REL_THR):
-                    # Forzar descongelado inmediato y mantenerlo por UNFREEZE_H_HOLD
                     freeze_x = freeze_y = freeze_t = False
                     hold_unfreeze_until = t + UNFREEZE_H_HOLD
                     h_unfreeze_events.append((t, diff_abs, diff_rel))
-                    # print para depuración:
-                    print(f"[H-UNFREEZE] t={t:.2f}s  |H|={diff_abs:.3g}  rel={diff_rel:.3g}  -> hold {UNFREEZE_H_HOLD}s")
+                    print(f"[H-UNFREEZE] t={t:.2f}s  |H|={diff_abs:.3g}  rel={diff_rel:.3g}  -> Hold {UNFREEZE_H_HOLD}s")
 
-            # --- Logs ---
+            # --- Logging ---
             t_log.append(t); p_log.append(p); pd_log.append([xd,yd,thd]); w_log.append(w_cmd)
             ux_log.append(ux); uy_log.append(uy); uth_log.append(uth)
             ex_log.append(ex); ey_log.append(ey); eth_log.append(eth)
@@ -381,9 +359,10 @@ def main():
             time.sleep(0.01)
 
     finally:
-        bot.stop(); print("[INFO] Parado.")
+        bot.stop()
+        print("[INFO] Simulation stopped.")
 
-    # -------- A arreglos --------
+    # --- Data Formatting ---
     t_log=np.array(t_log)
     p_log=np.array(p_log).T if p_log else np.zeros((3,0))
     pd_log=np.array(pd_log).T if pd_log else np.zeros((3,0))
@@ -396,13 +375,11 @@ def main():
     Wt_log=np.array(Wt_log).T if Wt_log else np.zeros((3,0))
     H_log=np.array(H_log, float)
 
-    # Procesar H_pred
     if len(H_pred_list) == len(t_log):
         H_pred = np.array([np.nan if v is None else float(v) for v in H_pred_list], float)
     else:
         H_pred = None
 
-    # ====== Métricas de H si hay predicción válida ======
     if H_pred is not None and np.isfinite(H_pred).any():
         mask = np.isfinite(H_pred) & np.isfinite(H_log)
         if mask.sum() > 5:
@@ -413,17 +390,17 @@ def main():
             r2   = r2_score_np(H_log[mask], H_pred[mask])
             rng  = (H_log[mask].max() - H_log[mask].min()) + 1e-12
             stdH = np.std(H_log[mask]) + 1e-12
-            print(f"[Comparación H] RMSE={rmse:.6e}  MAE={mae:.6e}  R2={r2:.6f}  "
+            print(f"[Hamiltonian Comparison] RMSE={rmse:.6e}  MAE={mae:.6e}  R2={r2:.6f}  "
                   f"NRMSE(range)={rmse/rng:.6e}  NRMSE(std)={rmse/stdH:.6e}")
         else:
-            print("[INFO] Muy pocos puntos válidos para métricas de H.")
+            print("[INFO] Insufficient valid points for Hamiltonian metrics.")
 
-    # ================== Gráficas ==================
+    # --- Plotting Subroutines ---
     def mark_switch(ax):
         if PLOT_SWITCH_MARK and (ML_SWITCH_T is None or switch_time_logged is not None):
             ts = (switch_time_logged if switch_time_logged is not None else (t_log[-1]/2.0))
             ax.axvline(ts, linestyle='--', linewidth=1.2)
-            ax.text(ts, ax.get_ylim()[1]*0.9, 'm_L cambiado', rotation=90, va='top', ha='right')
+            ax.text(ts, ax.get_ylim()[1]*0.9, 'm_L Switch', rotation=90, va='top', ha='right')
 
     def mark_h_events(ax):
         if PLOT_SWITCH_MARK and len(h_unfreeze_events)>0:
@@ -432,8 +409,8 @@ def main():
                 ax.axvline(te, linestyle=':', linewidth=1.0)
                 ax.text(te, ymax*0.8, 'H-UNF', rotation=90, va='top', ha='right')
 
-    plt.figure("Posición vs tiempo", figsize=(8,8))
-    for i, lab in enumerate(['x [m]','y [m]', r'$\theta$ [rad]']):
+    plt.figure("Position vs Time", figsize=(8,8))
+    for i, lab in enumerate(['x [m]', 'y [m]', r'$\theta$ [rad]']):
         ax = plt.subplot(3,1,i+1); ax.grid(True)
         if pd_log.shape[1]>0: ax.plot(t_log, pd_log[i], '--', lw=1.5, label=f'{lab}_d')
         if p_log.shape[1]>0:  ax.plot(t_log, p_log[i], lw=1.5, label=lab)
@@ -441,72 +418,72 @@ def main():
         if i==2: ax.set_xlabel('t [s]')
         ax.legend(loc='best'); mark_switch(ax); mark_h_events(ax)
 
-    plt.figure("Trayectoria XY", figsize=(7,7))
+    plt.figure("XY Trajectory", figsize=(7,7))
     ax = plt.gca(); ax.grid(True); ax.set_aspect('equal', adjustable='box')
-    if pd_log.shape[1]>0: ax.plot(pd_log[0], pd_log[1], 'k--', lw=1.5, label='ref')
+    if pd_log.shape[1]>0: ax.plot(pd_log[0], pd_log[1], 'k--', lw=1.5, label='Reference')
     if p_log.shape[1]>0:
-        ax.plot(p_log[0], p_log[1], 'b', lw=1.8, label='real')
+        ax.plot(p_log[0], p_log[1], 'b', lw=1.8, label='Real')
         if p_log.shape[1]>0:
             draw_robot_ax(ax, p_log[:,-1], L, l)
     ax.set_xlabel('x [m]'); ax.set_ylabel('y [m]')
-    ax.legend(loc='best'); ax.set_title(f"Seguimiento EKF-SNPID ({REF_MODO})")
+    ax.legend(loc='best'); ax.set_title(f"EKF-SNPID Tracking ({REF_MODO})")
 
-    plt.figure("Control (u_x, u_y, u_theta)", figsize=(9,4))
+    plt.figure("Control Signals (u_x, u_y, u_theta)", figsize=(9,4))
     ax = plt.gca(); ax.grid(True)
     ax.plot(t_log, ux_log, label='u_x')
     ax.plot(t_log, uy_log, label='u_y')
-    ax.plot(t_log, uth_log, label='u_Î¸')
-    ax.set_xlabel('t [s]'); ax.set_ylabel('Acción de control'); ax.legend(loc='best'); mark_switch(ax); mark_h_events(ax)
+    ax.plot(t_log, uth_log, label=r'u_$\theta$')
+    ax.set_xlabel('t [s]'); ax.set_ylabel('Control Action'); ax.legend(loc='best'); mark_switch(ax); mark_h_events(ax)
 
-    plt.figure("Errores", figsize=(9,4))
+    plt.figure("Errors", figsize=(9,4))
     ax = plt.gca(); ax.grid(True)
     ax.plot(t_log, ex_log, label='e_x')
     ax.plot(t_log, ey_log, label='e_y')
-    ax.plot(t_log, eth_log, label='e_'r'$\theta$¸')
+    ax.plot(t_log, eth_log, label=r'e_$\theta$')
     ax.set_xlabel('t [s]'); ax.legend(loc='best'); mark_switch(ax); mark_h_events(ax)
 
-    plt.figure("Errores normalizados", figsize=(9,4))
+    plt.figure("Normalized Errors", figsize=(9,4))
     ax = plt.gca(); ax.grid(True)
     ax.plot(t_log, exn_log, label='e_{x,n}')
     ax.plot(t_log, eyn_log, label='e_{y,n}')
-    ax.plot(t_log, ethn_log, label='e_{'r'$\theta$¸,n}')
-    ax.axhline(e_thr_freeze, linestyle='--', color='k', label='freeze')
-    ax.axhline(e_thr_unfz,   linestyle='--', color='r', label='unfreeze')
+    ax.plot(t_log, ethn_log, label=r'e_{$\theta$,n}')
+    ax.axhline(e_thr_freeze, linestyle='--', color='k', label='Freeze Threshold')
+    ax.axhline(e_thr_unfz,   linestyle='--', color='r', label='Unfreeze Threshold')
     ax.set_xlabel('t [s]'); ax.legend(loc='best'); mark_switch(ax); mark_h_events(ax)
 
-    plt.figure("Ganancias aprendidas", figsize=(9,9))
+    plt.figure("Learned Gains", figsize=(9,9))
     ax=plt.subplot(3,1,1); ax.grid(True)
     if Wx_log.shape[1]>0: ax.plot(t_log, Wx_log[0], t_log, Wx_log[1], t_log, Wx_log[2])
-    ax.legend(['Kp_x','Kd_x','Ki_x']); ax.set_title('X'); mark_switch(ax); mark_h_events(ax)
+    ax.legend(['Kp_x','Kd_x','Ki_x']); ax.set_title('X-Axis Gains'); mark_switch(ax); mark_h_events(ax)
     ax=plt.subplot(3,1,2); ax.grid(True)
     if Wy_log.shape[1]>0: ax.plot(t_log, Wy_log[0], t_log, Wy_log[1], t_log, Wy_log[2])
-    ax.legend(['Kp_y','Kd_y','Ki_y']); ax.set_title('Y'); mark_switch(ax); mark_h_events(ax)
+    ax.legend(['Kp_y','Kd_y','Ki_y']); ax.set_title('Y-Axis Gains'); mark_switch(ax); mark_h_events(ax)
     ax=plt.subplot(3,1,3); ax.grid(True)
     if Wt_log.shape[1]>0: ax.plot(t_log, Wt_log[0], t_log, Wt_log[1], t_log, Wt_log[2])
-    ax.legend([r'Kp_'r'$\theta$¸',r'Kd_'r'$\theta$¸',r'Ki_'r'$\theta$¸']); ax.set_title(''r'$\theta$¸'); ax.set_xlabel('t [s]'); mark_switch(ax); mark_h_events(ax)
+    ax.legend([r'Kp_$\theta$', r'Kd_$\theta$', r'Ki_$\theta$']); ax.set_title(r'$\theta$ Gains'); ax.set_xlabel('t [s]'); mark_switch(ax); mark_h_events(ax)
 
     if w_log.shape[1]>0:
-        plt.figure("Velocidades de rueda", figsize=(9,4))
+        plt.figure("Wheel Velocities", figsize=(9,4))
         ax = plt.gca(); ax.grid(True)
         for i in range(4): ax.plot(t_log, w_log[i], label=f'v_{i+1}')
-        ax.set_xlabel('t [s]'); ax.set_ylabel('rad/s'); ax.legend(loc='best'); mark_switch(ax); mark_h_events(ax)
+        ax.set_xlabel('t [s]'); ax.set_ylabel('Velocity [rad/s]'); ax.legend(loc='best'); mark_switch(ax); mark_h_events(ax)
 
-    plt.figure("Hamiltoniano", figsize=(10,4))
+    plt.figure("Hamiltonian", figsize=(10,4))
     ax = plt.gca(); ax.grid(True)
-    ax.plot(t_log, H_log, lw=1.2, label='H real (fí­sico)')
+    ax.plot(t_log, H_log, lw=1.2, label='Real H (Physical)')
     if H_pred is not None and np.isfinite(H_pred).any():
-        ax.plot(t_log, H_pred, '--', label='H predicho (TF)')
-    ax.set_xlabel('t [s]'); ax.set_ylabel('Energí­a [J]')
-    ax.set_title('Hamiltoniano canónico')
+        ax.plot(t_log, H_pred, '--', label='Predicted H (TF)')
+    ax.set_xlabel('t [s]'); ax.set_ylabel('Energy [J]')
+    ax.set_title('Canonical Hamiltonian')
     ax.legend(loc='best'); mark_switch(ax); mark_h_events(ax)
 
     if H_pred is not None and np.isfinite(H_pred).any():
-        plt.figure("Error del Hamiltoniano", figsize=(10,3))
+        plt.figure("Hamiltonian Error", figsize=(10,3))
         ax = plt.gca()
         diff = H_pred - H_log
         ax.plot(t_log, diff)
         ax.grid(True); ax.set_xlabel("t [s]"); ax.set_ylabel("H_pred - H_real [J]")
-        ax.set_title("Error absoluto del Hamiltoniano"); mark_switch(ax); mark_h_events(ax)
+        ax.set_title("Absolute Hamiltonian Error"); mark_switch(ax); mark_h_events(ax)
         plt.tight_layout()
 
     plt.show()
