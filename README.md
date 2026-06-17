@@ -1,73 +1,158 @@
-# 🚀 EKF-SNPID: Control Adaptativo Bajo Demanda con Supervisión Energética
+# 🚀 EKF-SNPID: On-Demand Adaptive Control with Energy-Based Supervision
 
-Este repositorio contiene la implementación de un controlador avanzado para robots móviles omnidireccionales (KUKA youBot). La propuesta central es un controlador **PID de Neurona Única (SNPID)** cuyas ganancias se sintonizan dinámicamente mediante un **Filtro de Kalman Extendido (EKF)**, optimizado para lidiar con saturación, obstáculos móviles y cambios súbitos de carga.
+This repository presents the implementation of an advanced control strategy for omnidirectional mobile robots (KUKA youBot). The core contribution is a **Single-Neuron PID Controller (SNPID)** whose gains are dynamically tuned through an **Extended Kalman Filter (EKF)**. The controller is designed to handle actuator saturation, moving obstacles, trajectory interruptions, and sudden payload variations.
 
 ---
 
 ## 📸 Demo / Preview
 
-<img width="1920" height="1046" alt="trayectoria" src="https://github.com/user-attachments/assets/7fe807ab-9fd2-4d7d-8760-60e8fe4ade24" />
+<img width="1920" height="1046" alt="trajectory" src="https://github.com/user-attachments/assets/7fe807ab-9fd2-4d7d-8760-60e8fe4ade24" />
 
-*Comparativa de seguimiento de trayectoria con una pausa entre PID, EKF-SNPID y el controlador propuesto*
-
----
-
-## 🛠️ Tecnologías usadas
-
-- **Simuladores:** MATLAB y CoppeliaSim.
-- **Lenguajes:** Python  y MATLAB.
-- **Algoritmos:** Filtro de Kalman Extendido (EKF), Redes Neuronales Hamiltonianas, Lógica de Histéresis, Anti-windup.
+*Trajectory-tracking comparison under a temporary stop condition between PID, EKF-SNPID, and the proposed controller.*
 
 ---
 
-## ⚙️ Innovaciones del Proyecto
+## 🛠️ Technologies Used
 
-El sistema no solo ajusta ganancias, sino que "decide" cuándo aprender mediante:
-
-1. **Supervisión Energética:** Una red neuronal ligera predice el **Hamiltoniano** del sistema en línea. Si hay discrepancias con el Hamiltoniano físico, detecta un cambio de planta (como una variación de carga) y activa la readaptación.
-2. **Lógica de Histéresis (Freeze/Unfreeze):** Congela el aprendizaje de ganancias cuando el error está dentro de márgenes aceptables para evitar la sobreexplotación de las ganancias.
-3. **Manejo de Pausas:** Capacidad de detener el seguimiento ante obstáculos y reanudar con suavidad, evitando la acumulación del error integral.
-4. **Compuesto de Estabilidad (EWMA):** Filtro para evitar reacciones prematuras ante ruidos o picos momentáneos en el error y el re-entreno de la red en línea.
+* **Simulators:** MATLAB and CoppeliaSim
+* **Programming Languages:** Python and MATLAB
+* **Algorithms:** Extended Kalman Filter (EKF), Hamiltonian Neural Networks, Hysteresis Logic, Anti-Windup Compensation
 
 ---
 
-## 📂 Estructura del Repositorio
+## ⚙️ Project Innovations
 
-### Control y Estimación (MATLAB)
-- `EFK_SNPID_KUKA_HAMIL.m`: Script para la supervisión de energía Hamiltoniana del sistema con el EKF_SNPID.
-- `EFK_SNPID_KUKA_PAUSA.m`: Implementación específica del EFK_SNPID para escenarios con obstáculos móviles que requieren pausas en el seguimiento.
-- `PID_KUKA.m` / `PID_KUKA_PAUSA.m`: Controladores de referencia para benchmarking y pruebas de pausa.
-- `comparativatrayectoria.m`: Genera las métricas de desempeño entre los tres controladores (RMSE, IAE/ISE, picos por eje y porcentaje de tolerancia).
-- `comparativatrayectoriapausa.m`: Genera las métricas de desempeño entre los tres controladores ante una pausa debida a un obstáculo móvil (RMSE, IAE/ISE, picos por eje y porcentaje de tolerancia).
+Unlike conventional adaptive controllers, the proposed framework not only adjusts gains but also decides **when adaptation is actually necessary** through a supervisory mechanism:
 
-### Inteligencia Artificial (Python)
-- `RedHamil.py`: Definición de la arquitectura de la red neuronal que predice el Hamiltoniano a partir de $(u_x, u_y, u_\theta)$.
-- `PruebaRedHamil.py`: Script de entrenamiento y validación de la red con datos post-evento.
-- `DatasetHamil.py`: Script para general el dataset para la red.
-- `prueba_masa.py`: Script del controlador propuesto en dónde cambia la masa del sistema.
-- `prueba_pausa.py`: Script en dónde se genera una interrupción o pausa al robot mediante un obstáculo móvil"".
-- `prueba_red.py` : Script del controlador propuesto para validar predicción de la red
+### 1. Energy-Based Supervision
+
+A lightweight neural network predicts the system Hamiltonian online. By comparing the predicted Hamiltonian with the physical Hamiltonian, the controller can detect plant variations (such as payload changes) and activate gain re-adaptation only when needed.
+
+### 2. Hysteresis Logic (Freeze/Unfreeze)
+
+The adaptation process is frozen whenever the tracking error remains within acceptable bounds, preventing unnecessary gain fluctuations and over-adaptation.
+
+### 3. Pause and Resume Capability
+
+The controller can temporarily halt trajectory tracking when obstacles are detected and smoothly resume operation without accumulating excessive integral error.
+
+### 4. Stability Composite (EWMA)
+
+An Exponentially Weighted Moving Average (EWMA) filter is used to avoid reactions to transient disturbances, measurement noise, or isolated error spikes, improving adaptation robustness.
+
 ---
 
-## ⚙️ Instalación y Uso
+## 📂 Repository Structure
 
-### Requisitos
-- MATLAB R2021b o superior (Control System Toolbox).
-- Python 3.8+ (PyTorch/TensorFlow, NumPy, Matplotlib, Pandas).
-- CoppeliaSim .
-  
-### Pasos
-1. **Clonar el repositorio:**
-   ```bash
-   git clone [https://github.com/Fidedpro888/PID-Adaptativo-Bajo-Demanda-Mediante-Redes-Neuronales.git](https://github.com/Fidedpro888/PID-Adaptativo-Bajo-Demanda-Mediante-Redes-Neuronales.git)
+### MATLAB Control and Estimation
 
-2. **Instalar las librerias previamente mencionadas**
+* `EFK_SNPID_KUKA_HAMIL.m`
+  EKF-SNPID implementation with Hamiltonian-based energy supervision.
 
-3. **Abrir el entorno de simulación de Coppelia en caso de usar un .py**
-   - `prueba_masa.ttt` : Entorno para el controlador con cambios de masa, pausa "imaginaria", poner a prueba la red, etc.
-   - `Pruebacubo.ttt` : Entorno para el controlador con una pausa física mediante un obstáculo móvil.
+* `EFK_SNPID_KUKA_PAUSA.m`
+  EKF-SNPID implementation for scenarios involving moving obstacles and trajectory interruptions.
 
-   Iniciar coppelia y después el código de python, sin olvidar de correr primero `DatasetHamil.py` y luego `RedHamil.py`
+* `PID_KUKA.m` / `PID_KUKA_PAUSA.m`
+  Baseline PID controllers used for benchmarking and pause-handling comparisons.
 
-4. **Para códgio de Matlab solamente es correrlo**
+* `comparativatrayectoria.m`
+  Generates performance metrics among the three controllers (RMSE, IAE, ISE, peak errors, and tolerance percentage).
 
+* `comparativatrayectoriapausa.m`
+  Generates comparative performance metrics for interruption scenarios caused by moving obstacles.
+
+---
+
+### Python Artificial Intelligence Modules
+
+* `RedHamil.py`
+  Defines the neural network architecture used to estimate the Hamiltonian from control inputs $(u_x, u_y, u_\theta)$.
+
+* `PruebaRedHamil.py`
+  Training and validation script for the Hamiltonian prediction network.
+
+* `DatasetHamil.py`
+  Generates the dataset used to train the Hamiltonian neural network.
+
+---
+
+### Proposed Controller
+
+* `Control_Adaptativo_Bajo_Demanda.py`
+  Complete implementation of the proposed **On-Demand Adaptive Controller**. This script integrates:
+
+  * EKF-based SNPID gain adaptation.
+  * Hamiltonian neural network supervision.
+  * Freeze/Unfreeze hysteresis logic.
+  * EWMA-based stability monitoring.
+  * Anti-windup compensation.
+  * Payload-change detection through energy discrepancies.
+  * Online adaptation activation only when significant plant changes are detected.
+
+  This file represents the full proposed architecture and serves as the main implementation of the research contribution.
+
+* `prueba_masa.py`
+  Experimental scenario where the robot undergoes sudden payload changes to evaluate the adaptive capabilities of the controller.
+
+* `prueba_pausa.py`
+  Experimental scenario involving a physical interruption generated by a moving obstacle.
+
+* `prueba_red.py`
+  Validation script used to evaluate the Hamiltonian prediction network during controller operation.
+
+---
+
+## ⚙️ Installation and Usage
+
+### Requirements
+
+* MATLAB R2021b or later (Control System Toolbox recommended)
+* Python 3.8+
+* TensorFlow or PyTorch
+* NumPy
+* Matplotlib
+* Pandas
+* CoppeliaSim
+
+---
+
+### Setup
+
+#### 1. Clone the Repository
+
+```bash
+git clone https://github.com/Fidedpro888/PID-Adaptativo-Bajo-Demanda-Mediante-Redes-Neuronales.git
+```
+
+#### 2. Install Dependencies
+
+Install the required Python libraries listed above.
+
+#### 3. Run the Simulation Environment (Python)
+
+Open CoppeliaSim and load the appropriate scene:
+
+* `prueba_masa.ttt`
+  Environment used for payload-change experiments, Hamiltonian supervision tests, and adaptive-control validation.
+
+* `Pruebacubo.ttt`
+  Environment used for obstacle-interruption experiments with a moving obstacle.
+
+Before executing the controller:
+
+1. Run `DatasetHamil.py`
+2. Run `RedHamil.py`
+3. Start CoppeliaSim
+4. Execute the desired Python script
+
+#### 4. MATLAB Simulations
+
+MATLAB scripts can be executed directly without additional setup.
+
+---
+
+## 🎯 Main Contribution
+
+The proposed controller introduces an **On-Demand Adaptive Control Framework** in which adaptation is not continuously active. Instead, a Hamiltonian-based supervisory layer evaluates whether the plant dynamics have significantly changed and only then enables EKF-based gain adaptation.
+
+This strategy reduces unnecessary parameter updates, improves robustness against noise, preserves stability during nominal operation, and provides effective adaptation to payload variations and environmental disturbances while maintaining accurate trajectory tracking.
